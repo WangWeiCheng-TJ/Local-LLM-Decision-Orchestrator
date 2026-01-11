@@ -23,7 +23,7 @@ Unlike purely local solutions, this system utilizes the state-of-the-art reasoni
 
 ```mermaid
 graph TD
-    User["User / Researcher"] -->|"1. Input JD Batch<br/>(Text / Screenshots)"| Agent["AI Agent Orchestrator<br/>(Gemini Free API)"]
+    User["User / Researcher"] -->|"1. Input JD Batch<br/>(Text / Screenshots)"| Agent["AI Agent Orchestrator<br/>(Gemini 1.5 Pro - Text & Vision)"]
     
     %% Local Database & Knowledge
     subgraph "Local Knowledge Base"
@@ -71,6 +71,36 @@ graph TD
     * **Battle Archive:** Automatically indexes the lifecycle of every application (JD + Resume Version + Outcome) into a local vector store.
     * **Active Recall:** When analyzing a new JD, the agent performs a semantic search against this "Battle Archive."
     * **Tactical Warning:** If a similar past application is found, the agent proactively retrieves the specific outcome (e.g., "Rejected due to Visa") to warn the user or suggest successful strategies from the past.
+
+## ⚡ Quick Start & Setup
+
+1. Environment Configuration (`.env`)
+Create a `.env` file in the root directory. This is crucial for linking your local files (e.g., Google Drive) to the Docker container. (refer to .env_example)
+
+2. Directory Setup
+Refer to [Data Structure](#-data-structure)
+
+3. Launch the System
+Start the Docker container in detached mode: ```docker-compose up -d --build```
+
+4. Memory Injection (Initialization)
+
+    **Phase 1**: <br>Run these once initially, or whenever you update your Resume/AboutMe.md.
+    * Ingest Personal Knowledge (Identity):<br> ```docker-compose run --rm orchestrator python src/ingest.py``` <br> Reads ```data/raw/AboutMe.md``` and whatever files in ```data/raw/``` to build the agent's core understanding of YOU.
+    * Ingest Battle History (Experience):<br> ```docker-compose run --rm orchestrator python src/ingest_history.py``` <br> Scans your ```LOCAL_PATH_TO_...``` folders to index past applications for the "War Room" recall feature.
+
+    **Phase 2**: The Hunt (Routine) <br>
+    Execute this loop when adding new JDs.
+    * Feed: Drop new JD PDFs (or images) into ```data/jds/```.
+    * Hunt: Run the main orchestrator.<br> ```docker-compose run --rm orchestrator python src/main.py``` 
+    * Review: Check the output in ```data/reports/```:
+        * ```Strategic_Leaderboard.csv```: Prioritize applications.
+        * ```Analysis_*.md```: Read detailed strategy & warnings.
+
+    **Phase 3**: Post-Battle Maintenance<br> When you receive an outcome (Reject/Interview):
+    * Move the JD folder from Ongoing to Rejected (on your local drive).
+    * Add an ```result.txt``` or ```reject_letter.txt``` inside the folder.
+    * Run Ingest History again to update the agent's memory:<br>```docker-compose run --rm orchestrator python src/ingest_history.py```
 
 ## 🛠️ Tech Stack
 * **Orchestration:** Python, Google Generative AI SDK (Gemini API)
