@@ -87,3 +87,4 @@ def gemini_ocr(filepath, model_name="gemini-1.5-flash"):
     except Exception as e:
         cprint(f"   ❌ OCR 失敗: {e}", "red")
         return None
+    

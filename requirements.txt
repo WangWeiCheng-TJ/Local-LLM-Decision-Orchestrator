@@ -23,3 +23,6 @@ python-dotenv==1.0.1
 
 # Termcolor: 讓 CLI 介面顯示清楚的 Pass/Fail 顏色
 termcolor==2.5.0
+
+# --- LangChain Modules ---
+langchain-text-splitters==0.3.3

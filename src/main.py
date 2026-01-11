@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from pypdf import PdfReader
 from pathlib import Path
 from utils import gemini_ocr
+from utils import identify_application_packet
 
 # --- 配置區 ---
 load_dotenv()
@@ -185,7 +186,7 @@ class AgentBrain:
             # 這裡先假設如果有找到就回傳，讓 LLM 自己判斷像不像
             
             # 3. 去那個資料夾挖出當時的 Resume 和 Outcome (如果有)
-            from utils import identify_application_packet, smart_extract_text # 假設你把 extract 搬去 utils 了
+            
             packet = identify_application_packet(folder_path)
             
             outcome_text = "Unknown/Pending"
