@@ -1,6 +1,6 @@
 # Job Hunting Season 2: Agentic Career Orchestrator 
 #### An ROI-Driven Multi-Agent System
-> **Current Status:** V2.0 Alpha (Migrating from Linear V1 to Agentic V2)
+> **Current Status:** V2.0 Design Phase (Architecture Validated / Implementation In Progress)
 > **Role:** Research Pilot for [Physically-Aware Synthetic Surveillance Data]
 
 ## 🎯 Motivation
@@ -9,7 +9,8 @@ The primary motivation behind this project is to address the inefficiency of man
 
 In job hunting, one must sift through hundreds of job descriptions to find the few that match complex constraints (e.g., visa rules, tech stack compatibility, remote work policies). Traditional keyword search fails to capture these semantic nuances. For example, a position that requires computer vision experience could drown in the title "Machine Learning Engineer". 
 
-Furthermore, effective job hunting requires more than just reading; it demands **verification** (checking market salary, validating research alignment), **reflection** (comparing against past applications to avoid repeated mistakes), and **strategic execution** (prioritizing high-ROI opportunities and allocating effort efficiently), which processes that are computationally exhausting to perform manually at scale.
+Furthermore, effective job hunting requires more than just reading; it demands **verification** (checking market salary, validating research alignment), **reflection** (comparing against past applications to avoid repeated mistakes), and **strategic execution** (prioritizing high-ROI opportunities and allocating effort efficiently). These are processes that are computationally exhausting.
+
 
 This project was built to validate that a Local LLM Agent can serve as an **autonomous decision orchestrator** to solve this "needle in a haystack" problem while preserving data privacy.
 
