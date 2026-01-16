@@ -148,7 +148,6 @@ graph TD
     end
 
     %% Styling
-    style Indexer fill:#b2dfdb,stroke:#00695c
     style ResumeDB fill:#b2dfdb,stroke:#00695c
     style RejectLog fill:#ffcdd2,stroke:#c62828
     style UserCheck fill:#fff9c4,stroke:#fbc02d,stroke-width:2px
