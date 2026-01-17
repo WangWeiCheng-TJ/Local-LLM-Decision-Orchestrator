@@ -2,7 +2,7 @@ from duckduckgo_search import DDGS
 import time
 
 class SalaryTool:
-    def __init__(self, max_retries=3, retry_delay=3):
+    def __init__(self, max_retries=3, retry_delay=20):
         """
         初始化 SalaryTool
         max_retries: 最大重試次數（遇到速率限制時）

@@ -4,13 +4,12 @@ import chromadb
 import google.generativeai as genai
 from termcolor import cprint
 from dotenv import load_dotenv
-from pypdf import PdfReader
 
 # 引入防呆工具 (請確保 src/utils/llm_utils.py 存在)
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 from src.utils import safe_generate_json
-from src.utils import gemini_ocr
+from src.utils import extract_text_from_pdf
 
 load_dotenv()
 API_KEY = os.getenv("GOOGLE_API_KEY")
@@ -31,23 +30,8 @@ def extract_text(file_path):
     try:
         # === 處理 PDF ===
         if ext == ".pdf":
-            text = ""
-            try:
-                reader = PdfReader(file_path)
-                for page in reader.pages:
-                    content = page.extract_text()
-                    if content:
-                        text += content + "\n"
-            except Exception as e:
-                cprint(f"   ⚠️ pypdf 讀取失敗，嘗試 OCR... ({e})", "yellow")
-                text = "" # 設為空，觸發下方的 OCR
-
-            # [OCR 防呆邏輯]
-            # 如果讀出來是空的，或是字數太少 (例如 < 100 字，可能只是圖表或 header)，就當作它是掃描檔
-            if not text or len(text.strip()) < 50:
-                cprint(f"   👁️ 偵測到掃描檔或純圖片 PDF，啟動 Gemini OCR: {filename}", "cyan")
-                text = gemini_ocr(file_path, model_name=MODEL_NAME)
-            
+            # 使用 utils 中的 extract_text_from_pdf (基於 utils.py:12)
+            text, used_ocr = extract_text_from_pdf(file_path, model_name=MODEL_NAME)
             # [修正點 1] 回傳通用的 "pdf_document"，不要在這裡定死它是 resume
             return text, "pdf_document"
 

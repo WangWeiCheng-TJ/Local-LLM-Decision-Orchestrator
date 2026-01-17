@@ -54,105 +54,110 @@ All core document storage (CVs, personal databases) remains **locally managed** 
 
 ```mermaid
 graph TD
-   %% ==========================================
-    %% LEVEL 0: 履歷軍火庫 (The Arsenal)
-    %% 這是獨立運作的預處理流程
-    %% ==========================================
-    subgraph "Level 0: Pre-processing"
-        ResPDFs["📄 My Resume PDFs"] --> IndexerCV["🤖 Indexer Agent"]
+    %% === 全域 Council 資源池 (MoE) ===
+    subgraph Pool ["🏛️ The Expert Council Pool (MoE)"]
+        direction LR
+        E1["👔 HR Gatekeeper<br/>(Culture Fit, Soft Skills & Red Flags)"]:::council
+        E2["⚙️ Tech Lead<br/>(Tech Stack Depth & Hard Skills)"]:::council
+        E3["♟️ Strategist<br/>(ROI, Tax, Location Tier & Stability)"]:::council
+        E4["🛂 Visa Officer<br/>(Work Permit & Legal Feasibility)"]:::council
+        E5["🔬 Academic<br/>(Pubs, Research Impact & Innovation)"]:::council
+        E6["🏗️ Architect<br/>(Scalability, Cloud & Prod-Readiness)"]:::council
+        E7["🦁 Leadership<br/>(Mentorship & Cross-functional Influence)"]:::council
+        E8["🚀 Startup Vet<br/>(Equity, Risk & Multi-tasking)"]:::council
+    end
+    
+    %% === LEVEL 0: 履歷軍火庫 ===
+    subgraph L0 ["Level 0: Pre-processing"]
+        ResumeDB[("🗄️ Resume Vector DB")]:::db
+        PersonalDB[("🗄️ Personal Vector DB")]:::db
+        IndexerCV["🤖 Indexer Agent"]:::agent
+        IndexerPK["🤖 Indexer Agent"]:::agent
         
-        IndexerCV -->|"AI Tagging<br/>(#Privacy, #Vision)"| DB_Entry_CV["Indexed CV"]
-        DB_Entry_CV --> ResumeDB[("🗄️ Resume Vector DB<br/>(Chroma)")]
+        ResPDFs --> IndexerCV --> ResumeDB
+        AllFiles --> IndexerPK --> PersonalDB
 
-        AllFiles["📄 Knowledge About Me"] --> IndexerPK["🤖 Indexer Agent"]
-        
-        IndexerPK -->|"AI Tagging<br/>(#Privacy, #Vision)"| DB_Entry_PK["Indexed Data"]
-        DB_Entry_PK --> PersonalDB[("🗄️ Personal Vector DB<br/>(Chroma)")]
+
     end
 
-    
-    
-    %% ==========================================
-    %% Phase 1: 戰場情報 (Intelligence)
-    %% ==========================================
-    subgraph "Phase 1: Intelligence Gathering"
-        JDs["📂 JD Batch"] --> Parser["JD Parser"]
-        Parser --> RawText[("📄 Raw Text")]
-        RawText --> Tools["🌍 External Tools"]
-        
-        RawText & Tools --> Dossier["🗂️ Enriched Dossier"]
+    %% === Phase 1: 戰場情報 ===
+    subgraph P1 ["Phase 1: Intelligence Gathering"]
+        Parser["JD Parser"]:::agent --> RawText[("📄 Raw Text")]
+        RawText --> Tools["🌍 External Tools"]:::agent
+        RawText & Tools --> Dossier["🗂️ Enriched Dossier"]:::doc
     end
 
-    %% ==========================================
-    %% Phase 2: 檢傷分類 (Triage)
-    %% ==========================================
-    subgraph "Phase 2: Intelligent Triage"
-        Dossier --> Triage["🏥 Triage Agent"]
-        PersonalDB -.-> Triage["🏥 Triage Agent"]
-        
-        Triage -- "Hard Constraints Check<br/>(Visa/PhD)" --> RejectLog["📝 Rejected_Log.json<br/>(Brief Reason)"]
+    %% === Phase 2: 檢傷分類 ===
+    subgraph P2 ["Phase 2: Intelligent Triage"]
+        Dossier --> Triage["🏥 Triage Agent <br/> Hard Constraints Check(Visa)"]:::agent
+        PersonalDB -.-> Triage["🏥 Triage Agent <br/> Hard Constraints Reject(Visa/PhD)"]
+     
+        Triage -- "❌ Reject" --> RejectLog["📝 Rejected_Log.json<br/>(Brief Reason)"]:::output
         RejectLog --> Bin["📂 /99_Trash"]
-        
-        Triage -- "✅ Pass" --> Metadata["Metadata<br/>(Role/Domain)"]
+
+        Triage -- "✅ Pass" --> Metadata["Metadata<br/>(Role/Domain)"]:::doc
+        Metadata --> Router
     end
 
-    %% ==========================================
-    %% Phase 3: 專家診斷 (Diagnosis)
-    %% ==========================================
-    subgraph "Phase 3: Expert Diagnosis"
-        Metadata --> Router{"Router<br/>(Decide experts to activate)"}
+    %% === Phase 3 流程 ===
+    subgraph P3 ["Phase 3: Expert Diagnosis"]
+        Metadata --> Router["🔀 Council Router"]:::agent
+        Dossier --> Router
+
+        Router --> |"Calls"| ActivePanel
         
-        Router --> ExpertLayer["👨‍🔬 Expert Council"]
+        subgraph ActivePanel ["🧑‍⚖️ Active Panel(Same Instance, Different Modes)"]
+            direction TB
+            Panel1["🔍 Skill Analysis Mode"]:::panel
+            Panel2["🧠 Gap & Effort Analysis Mode"]:::panel
+            Panel1 --> |"Requirement Context"|Panel2
+        end
         
-        %% 連線：專家同時參考 完整檔案 + 履歷庫
-        Dossier -.-> ExpertLayer
-        ResumeDB -.->|"Retrieve Linked Resumes"| ExpertLayer
-        
-        ExpertLayer --> Eval["Evaluation Data<br/>(Skill Fit / Rewrite Effort / Gaps)"]
+        Dossier --> Panel2
+        Panel1 --> |"Search Queries"| Retriever["🤖 Retriever"]:::agent
+
+        Retriever <-.-> |"Evidence/Chunks"| PersonalDB
+        Retriever <-.-> |"Reusable Sentences"| ResumeDB
+        Retriever --> |"Retrieved Material"| Panel2
+
+        Panel2 --> Out["📊 Strategy Data (Blueprint)"]:::output
     end
 
-    %% =======================
-    %% Phase 4: 戰略地圖 (The War Room)
-    %% 這裡是最大的改變：先畫圖，再決策
-    %% =======================
-    subgraph "Phase 4: Strategic Command"
-        Eval & Metadata --> MapEngine["🗺️ Correlation Engine"]
-        
-        MapEngine --> VisualMap["Visual Correlation Map<br/>(Which JDs are similar?)"]
-        
-        VisualMap --> TheGeneral["👮 The General (Strategist)"]
-        
-        TheGeneral -->|"Draft Plan"| BattlePlan["📊 ImpactReport (JSON)<br/>Action 1: low effort, high impact (15 jds), high priority"]
+    %% === Phase 4: 戰略地圖 ===
+    subgraph P4 ["Phase 4: Strategic Command"]
+        Out & Metadata --> MapEngine["🗺️ Correlation Engine"]:::agent
+        MapEngine --> VisualMap["Visual Correlation Map"]
+        VisualMap --> TheGeneral["👮 Strategist"]:::agent
+        TheGeneral --> BattlePlan["📊 ImpactReport"]:::output
     end
 
-    %% ==========================================
-    %% Human Loop (人類介入)
-    %% ==========================================
+    %% === Human Loop ===
     BattlePlan --> UserCheck{"👤 User Review"}
-    
+    UserCheck -- "Approve" --> BriefingAgent["⚡ Briefing Agent"]:::agent
+
     UserCheck -- "Modify / Veto" --> Refine["Adjust Plan"]
     Refine --> BriefingAgent
-    
-    UserCheck -- "Approve" --> BriefingAgent["⚡ Briefing Agent"]
 
-    %% ==========================================
-    %% Phase 5: 戰術執行 (Execution)
-    %% ==========================================
-    subgraph "Phase 5: Campaign Output"
-        BriefingAgent -->|"Cluster Context"| Advisor["👨‍🔬 Expert (Advisor Mode)"]
-        PersonalDB -.->|"Personal Knowledge"| Advisor["👨‍🔬 Expert (Advisor Mode)"]
-        ResumeDB -.->|"Past Resume"| Advisor["👨‍🔬 Expert (Advisor Mode)"]
-        
-        Advisor --> OutputA["📂 /01_Campaign_Privacy<br/>- 📄 Strategy_Guide.md (Advice: Insert X objective in project A)<br/>- 📂 10 Target JDs"]
-        Advisor --> OutputB["📂 /02_Campaign_Infra<br/>..."]
+    %% === Phase 5: 戰術執行 ===
+    subgraph P5 ["Phase 5: Campaign Output"]
+        BriefingAgent -->|"Cluster Context"| Panel3["👨‍🔬 Advisor Mode"]:::panel
+        PersonalDB -.->|"Personal Knowledge"| Panel3["👨‍🔬 Advisor Mode"]:::panel
+        ResumeDB -.->|"Past Resume"| Panel3["👨‍🔬 Advisor Mode"]:::panel
+
+        Panel3 --> OutputA["📂 /01_Campaign_Privacy<br/>- 📄 Strategy_Guide.md (Advice: Insert X objective in project A)<br/>- 📂 10 Target JDs"]:::output
+        Panel3 --> OutputB["📂 /02_Campaign_Infra<br/>..."]:::output
     end
 
-    %% Styling
-    style ResumeDB fill:#b2dfdb,stroke:#00695c
-    style RejectLog fill:#ffcdd2,stroke:#c62828
-    style UserCheck fill:#fff9c4,stroke:#fbc02d,stroke-width:2px
-    style Advisor fill:#c8e6c9,stroke:#2e7d32
-```
+    %% === 樣式定義 (跨模式相容) ===
+    classDef council fill:#e1bee7,stroke:#4a148c,color:#000;
+    classDef panel fill:#fff9c4,stroke:#fbc02d,color:#000;
+    classDef agent fill:#c8e6c9,stroke:#2e7d32,color:#000;
+    classDef db fill:#bbdefb,stroke:#1565c0,color:#000;
+    classDef doc fill:#f5f5f5,stroke:#616161,color:#000;
+    classDef output fill:#ffccbc,stroke:#d84315,color:#000;
+``` 
+
+
 
 ## 🚀 Key Features
 #### 1. The Arsenal: Semantic Resume Indexing (Level 0)

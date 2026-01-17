@@ -7,7 +7,39 @@ import json
 
 import google.generativeai as genai 
 from termcolor import cprint
+from pypdf import PdfReader
 
+import chromadb
+from termcolor import cprint
+
+CHROMA_PATH = os.getenv("CHROMA_DB_PATH", "/app/data/chroma_db")
+
+def extract_text_from_pdf(filepath, model_name="gemini-1.5-flash"):
+    """
+    [新增] 通用讀取工具：優先嘗試 pypdf，失敗或字數太少則自動轉 OCR
+    這樣 ingest 和 scout 都可以直接 import 這個函式。
+    """
+    text = ""
+    used_ocr = False
+    filename = os.path.basename(filepath)
+
+    # 1. 嘗試 pypdf
+    try:
+        reader = PdfReader(filepath)
+        for page in reader.pages:
+            content = page.extract_text()
+            if content: text += content + "\n"
+    except Exception:
+        pass 
+
+    # 2. OCR Fallback (直接呼叫同檔案內的 gemini_ocr)
+    if len(text.strip()) < 50:
+        cprint(f"   👁️ [OCR Triggered] Content too short: {filename}", "cyan")
+        # 假設 gemini_ocr 就在這個檔案下面定義好了
+        text = gemini_ocr(filepath, model_name=model_name)
+        used_ocr = True
+    
+    return text, used_ocr
 
 def identify_application_packet(folder_path):
     """
@@ -151,3 +183,46 @@ def safe_generate_json(model, prompt, retries=3, delay=20, default_output=None):
     # 如果重試次數用完還是失敗
     cprint(f"❌ API Call Failed after {retries} attempts.", "red")
     return default_output if default_output is not None else {}
+
+
+    def fetch_relevant_history_resumes(jd_text, n_results=3):
+        """
+        根據目前的 JD，去 History DB 找出最相關的 N 份「過去履歷」。
+        回傳：一個包含結構化履歷內容的 List。
+        """
+        try:
+            client = chromadb.PersistentClient(path=CHROMA_PATH)
+            # 注意：我們之前把 Resume 存進了 past_applications_jds，並標記 doc_type="RESUME"
+            collection = client.get_collection("past_applications_jds")
+            
+            # 1. 語意搜尋：找跟這個 JD 最像的 Resume
+            results = collection.query(
+                query_texts=[jd_text],
+                n_results=n_results,
+                where={"doc_type": "RESUME"} # 只找履歷，不找過去的 JD 或 Cover Letter
+            )
+            
+            retrieved_resumes = []
+            
+            for i, meta in enumerate(results['metadatas'][0]):
+                # 取得原始檔名作為 ID
+                source_name = meta.get('filename', f"Resume_{i}")
+                folder = meta.get('folder', 'Unknown')
+                
+                # 我們在 ingest 時把結構化資料存進了 'analysis_json' 這個 metadata 欄位
+                json_str = meta.get('analysis_json', '{}')
+                
+                try:
+                    struct_data = json.loads(json_str)
+                    retrieved_resumes.append({
+                        "source_id": f"{folder}/{source_name}", # 標記來源，方便 Council 指路
+                        "content": struct_data
+                    })
+                except:
+                    continue
+
+            return retrieved_resumes
+
+        except Exception as e:
+            cprint(f"⚠️ History Retrieval Error: {e}", "red")
+            return []

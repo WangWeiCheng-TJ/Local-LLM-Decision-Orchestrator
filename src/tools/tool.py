@@ -1,8 +1,11 @@
 import random
 import time
+import os
 
 from src.tools.arXiv import ArxivTool
 from src.tools.salary import SalaryTool
+
+USE_MOCK_TOOLS = os.getenv("USE_MOCK_TOOLS", "False").lower() == "true"
 
 class MockSalaryTool:
     """模擬查詢市場薪資行情的工具"""
@@ -96,8 +99,10 @@ class MockArxivTool:
 # 簡單的工廠模式，方便外部呼叫
 class ToolRegistry:
     def __init__(self):
-        # self.salary_tool = MockSalaryTool()
-        self.salary_tool = SalaryTool()
+        if USE_MOCK_TOOLS==True:
+            self.salary_tool = MockSalaryTool()
+        else:
+            self.salary_tool = SalaryTool(retry_delay=20)
         # self.arxiv_tool = MockArxivTool()
         self.arxiv_tool = ArxivTool()
 
