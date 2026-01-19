@@ -65,7 +65,7 @@ All core document storage (CVs, personal databases) remains **locally managed** 
 ```mermaid
 graph TD
     %% === 全域 Council 資源池 (MoA) ===
-    subgraph Pool ["🏛️ The Expert Council Pool (MoA)"]
+    subgraph Pool ["🏛️ The Reviewer Council Pool (MoA)"]
         direction LR
         E1["👔 HR Gatekeeper<br/>(Culture Fit, Soft Skills & Red Flags)"]:::council
         E2["⚙️ Tech Lead<br/>(Tech Stack Depth & Hard Skills)"]:::council
@@ -150,16 +150,16 @@ graph TD
 
     %% === Phase 5: 戰術執行 ===
     subgraph P5 ["Phase 5: Campaign Output"]
-    Aggregator["👨‍🔬 Aggregator<br/>(Orgainize Suggestions, Conflict Resolution)"]:::council
+    Editor["👨‍🔬 Editor<br/>(Orgainize Suggestions, Conflict Resolution)"]:::council
 
         BriefingAgent -->|"Cluster Context"| Panel3["👨‍🔬 Advisor Mode"]:::panel
         PersonalDB -.->|"Personal Knowledge"| Panel3["👨‍🔬 Advisor Mode"]:::panel
         ResumeDB -.->|"Past Resume"| Panel3["👨‍🔬 Advisor Mode"]:::panel
         
-        Panel3["👨‍🔬 Advisor Mode"] --> Aggregator["👨‍🔬 Aggregator"]:::council
+        Panel3["👨‍🔬 Advisor Mode"] --> Editor["✍️ Editor"]:::council
 
-        Aggregator --> OutputA["📂 /01_Campaign_Privacy<br/>- 📄 Strategy_Guide.md (Advice: Insert X objective in project A)<br/>- 📂 10 Target JDs"]:::output
-        Aggregator --> OutputB["📂 /02_Campaign_Infra<br/>..."]:::output
+        Editor --> OutputA["📂 /01_Campaign_Privacy<br/>- 📄 Strategy_Guide.md (Advice: Insert X objective in project A)<br/>- 📂 10 Target JDs"]:::output
+        Editor --> OutputB["📂 /02_Campaign_Infra<br/>..."]:::output
     end
 
     %% === 樣式定義 (跨模式相容) ===
@@ -189,8 +189,8 @@ graph TD
    * **Filtering Logic:** Automatically rejects roles based on **Visa Sponsorship** feasibility (EU Work Permit), **PhD Relevance**, and **Expertise mis-Matched** constraints.
    * **Impact:** Reduces compute costs and cognitive load by ensuring only "playable" opportunities enter the analysis pipeline.
 
-#### 4. Dynamic Mixture-of-Advisors (Phase 3)
-* **Router-Based Diagnosis**: Instead of a single generic "Analysis Prompt", a Router Agent activates a small set of specialized advisors based on the JD's domain and seniority.
+#### 4. Dynamic Mixture-of-Agents (Phase 3)
+* **Router-Based Diagnosis**: Instead of a single generic "Analysis Prompt", a Router Agent activates a small set of specialized reviewers based on the JD's domain and seniority.
     Example of the Council Members:
     - **Academic Analyst**: For research‑heavy roles (e.g., Research Scientist; focus: publication track record, topic alignment, lab/team fit).
     - **Engineering Lead**: For ML/Software roles (focus: deployment readiness, C++/systems skills, production constraints).
