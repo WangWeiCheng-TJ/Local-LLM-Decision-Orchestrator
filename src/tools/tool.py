@@ -122,11 +122,52 @@ class ToolRegistry:
         arxiv_info = self.arxiv_tool.search_papers(company, keywords)
 
         return f"""
-### 🛠 External Intelligence Report
-- **Market Salary Search Results**:
-{salary_info}
+                ### 🛠 External Intelligence Report
+                - **Market Salary Search Results**:
+                {salary_info}
 
-- **Research Activity (ArXiv)**:
-{arxiv_info}
---------------------------------------------------
-"""
+                - **Research Activity (ArXiv)**:
+                {arxiv_info}
+                --------------------------------------------------
+                """
+
+# ==========================================
+# 🛡️ 驗證器 (維持不變)
+# ==========================================
+
+def validate_council_skill(data):
+    if not isinstance(data, dict): return False, "Not a dict"
+    
+    # 經過 normalize_structure 後，這裡應該要有 required_skills
+    if "required_skills" not in data:
+        # 如果還是沒有，可能是空的或者完全爛掉
+        return False, f"Missing 'required_skills' field. Found keys: {list(data.keys())}"
+
+    skills = data["required_skills"]
+    if not isinstance(skills, list): return False, "'required_skills' must be a list."
+
+    for i, s in enumerate(skills):
+        if not isinstance(s, dict):
+            return False, f"Skill #{i} must be an object with 'analysis', got {type(s).__name__}"
+        analysis = s.get("analysis", {})
+        if not isinstance(analysis, dict): return False, f"Skill #{i} 'analysis' must be an object"
+        quote = (analysis.get("quote_from_jd") or "").strip() if isinstance(analysis.get("quote_from_jd"), str) else ""
+        if len(quote) < 3: return False, f"Skill #{i} invalid quote"
+        
+    return True, ""
+
+def validate_gap_effort(data):
+    if not isinstance(data, dict): return False, "Not a dict"
+    
+    # 相容性處理 (Phase 3)
+    gaps = data.get("gap_analysis", [])
+    if not gaps and "gap_analysis" not in data: 
+         return False, f"Missing 'gap_analysis'. Found keys: {list(data.keys())}"
+
+    for item in gaps:
+        effort = item.get("effort_assessment", {})
+        level = effort.get("level", "")
+        if level not in ["NONE", "LOW", "MEDIUM", "HIGH"]:
+            return False, f"Invalid Effort Level: {level}"
+            
+    return True, ""

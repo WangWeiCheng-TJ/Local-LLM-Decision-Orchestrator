@@ -159,7 +159,7 @@ def generate_with_retry(model, prompt, validator_func, max_retries=2):
             
             if attempt < max_retries:
                 current_prompt += f"\n\n[SYSTEM ERROR]: {error_msg}. Check your JSON structure keys."
-                time.sleep(2)
+                time.sleep(20*max_retries)
 
         except json.JSONDecodeError:
             tqdm.write(colored(f"  ❌ JSON Parsing Error (Attempt {attempt+1})", "red"))
@@ -168,49 +168,7 @@ def generate_with_retry(model, prompt, validator_func, max_retries=2):
 
         except Exception as e:
             tqdm.write(colored(f"  ❌ System Error: {e}", "red"))
-            time.sleep(2)
+            time.sleep(20)
 
     tqdm.write(colored(f"  💀 Failed after {max_retries} retries.", "red", attrs=['bold']))
     return last_result or {"error": "Max retries reached"}
-
-
-# ==========================================
-# 🛡️ 驗證器 (維持不變)
-# ==========================================
-
-def validate_council_skill(data):
-    if not isinstance(data, dict): return False, "Not a dict"
-    
-    # 經過 normalize_structure 後，這裡應該要有 required_skills
-    if "required_skills" not in data:
-        # 如果還是沒有，可能是空的或者完全爛掉
-        return False, f"Missing 'required_skills' field. Found keys: {list(data.keys())}"
-
-    skills = data["required_skills"]
-    if not isinstance(skills, list): return False, "'required_skills' must be a list."
-
-    for i, s in enumerate(skills):
-        if not isinstance(s, dict):
-            return False, f"Skill #{i} must be an object with 'analysis', got {type(s).__name__}"
-        analysis = s.get("analysis", {})
-        if not isinstance(analysis, dict): return False, f"Skill #{i} 'analysis' must be an object"
-        quote = (analysis.get("quote_from_jd") or "").strip() if isinstance(analysis.get("quote_from_jd"), str) else ""
-        if len(quote) < 3: return False, f"Skill #{i} invalid quote"
-        
-    return True, ""
-
-def validate_gap_effort(data):
-    if not isinstance(data, dict): return False, "Not a dict"
-    
-    # 相容性處理 (Phase 3)
-    gaps = data.get("gap_analysis", [])
-    if not gaps and "gap_analysis" not in data: 
-         return False, f"Missing 'gap_analysis'. Found keys: {list(data.keys())}"
-
-    for item in gaps:
-        effort = item.get("effort_assessment", {})
-        level = effort.get("level", "")
-        if level not in ["NONE", "LOW", "MEDIUM", "HIGH"]:
-            return False, f"Invalid Effort Level: {level}"
-            
-    return True, ""

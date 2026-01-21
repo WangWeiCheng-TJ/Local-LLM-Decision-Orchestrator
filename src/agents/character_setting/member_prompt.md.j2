@@ -46,37 +46,76 @@ Output: {{ example.output_json }}
 ### Output Instruction
 Return JSON strictly following `skill_schema`.
 
-{% elif mode == "GAP_EFFORT" %}
-## 🔵 Phase 2: Gap & Effort Analysis
+{% elif mode == "GAP_EFFORT" %}{% elif mode == "GAP_EFFORT" %}
+## 🔵 Phase 3.5: Gap & Effort Analysis (Strict Mode)
 
-### 🧠 Your Memory (From Phase 1)
-**Context:** This is what YOU ({{ role_name }}) identified as required skills in the previous step.
+### 🎯 Task
+You are the **Auditor & Resume Strategist**.
+Your goal is to evaluate if the candidate matches the **Required Skills** and estimate the **Rewriting Effort**.
+
+### 📥 Inputs
+1. **Target Skills**:
 """
 {{ previous_phase_memory | tojson(indent=2) }}
 """
 
-### Input Data 2: Target Skills (from Phase 1)
-{{ skill_list_json }}
-
-### Input Data 3: Your Personal Database (Evidence Search)
-**Description:** Raw data from papers, GitHub, and notes.
+2. **Personal Knowledge DB (Source of Truth)**:
 """
-{{ personal_db_text }} 
+{{ personal_db_text }}
 """
 
-### Input Data 4: Your Resume Database (Reusable Sentences)
-**Description:** Bullet points from previous CVs.
+3. **Current Resume Bullets (Draft Status)**:
 """
 {{ resume_db_text }}
 """
 
-### Logic Instruction
-1. **Check Gap:** Look into **Personal Database**. If found, there is NO skill gap.
-2. **Check Effort:** Look into **Resume Database**. 
-   - If a suitable sentence exists -> Effort is None (Tweak).
-   - If a suitable sentence exists but need to twist for better view point -> Effort is Low (Rewrite).
-   - If no sentence exists but skill is found -> Effort is Medium (Write from Evidence).
-   - If skill is not found -> Effort is High (Study).
+### ⚙️ Logic Pipeline (Follow Strictly)
+
+**Step 1: Evidence Check (Hard Filter)**
+- Search `Personal Knowledge DB` for ANY evidence (keywords, projects, papers) related to the skill.
+- If **NOT FOUND**: Mark as `CRITICAL_GAP`. **STOP** analysis for this skill. Do not try to fake it.
+- If **FOUND**: Proceed to Step 2.
+
+**Step 2: Resume Reuse Check (Effort Calculation)**
+- Look at `Current Resume Bullets`. Is there an existing bullet that covers this skill?
+- Compare the **Existing Bullet** vs. **JD Requirement**.
+
+**Step 3: Determine Effort Level**
+- **LOW**: Exact match. The resume already tells the story perfectly. (Action: Keep it)
+- **MEDIUM (Twist)**: Concept match. The resume mentions the tech, but the *angle* is wrong (e.g., "Privacy focus" vs "Security focus"). (Action: Rewrite/Reframe)
+- **HIGH (New Content)**: Evidence exists in DB (e.g., specific PhD chapter or side project), but NOT in the resume. (Action: Draft new bullet from scratch)
+
+### 📝 Expected JSON Structure
+Return a JSON object with a root key `"gap_analysis"`.
+
+```json
+{
+  "gap_analysis": [
+    {
+      "topic": "Skill Name",
+      
+      // --- Step 1: Evidence ---
+      "evidence_in_personal_db": {
+        "status": "FOUND_STRONG" | "FOUND_WEAK" | "NOT_FOUND",
+        // IMPORTANT: Extract the FULL sentence or project description, not just a title.
+        "evidence_snippet": "Full sentence from Personal DB..." 
+      },
+
+      // --- Step 2 & 3: Only if FOUND ---
+      // If NOT_FOUND, set these to null
+      "resume_reusability": {
+        "status": "EXACT_MATCH" | "CONCEPT_MATCH" | "NO_MATCH",
+        "closest_existing_bullet": "The actual bullet point text..."
+      },
+      "effort_assessment": {
+        "level": "LOW" | "MEDIUM" | "HIGH" | "BLOCKER",
+        // Provide a strategy for the Writer Agent
+        "strategy": "Refocus the 'Adversarial Learning' paper to emphasize 'Red Teaming' methodologies as requested by the JD.",
+        "estimated_action": "Twist Angle" | "Write New" | "None"
+      }
+    }
+  ]
+}
 
 ### Few-Shot Examples (Diagnosis Logic)
 {% for example in few_shot_examples.gap_effort %}

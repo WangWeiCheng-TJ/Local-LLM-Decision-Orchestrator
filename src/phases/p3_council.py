@@ -4,19 +4,18 @@ import json
 import sys
 from termcolor import colored, cprint
 from tqdm import tqdm
-import google.generativeai as genai
 from dotenv import load_dotenv
 
 # === 路徑設定 ===
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'))) 
 sys.path.append(os.path.abspath(".")) 
 
-# 引入工具
+# === Imports ===
 try:
     from src.agents.character_setting.prompt_loader import PromptFactory
-    from src.tools.retry import generate_with_retry, validate_council_skill
-    
-    # [修正] 根據你的指示，cache_manager 現在在 agents 裡
+    from src.tools.model_gateway import SmartModelGateway   # [NEW] 統一入口
+    from src.tools.db_connector import db_connector         # [NEW] 資料庫連線
+    from src.tools.tool import validate_council_skill, validate_gap_effort
     from src.agents.cache_manager import council_memory 
 except ImportError as e:
     cprint(f"❌ Error: Import failed. {e}", "red")
@@ -25,25 +24,16 @@ except ImportError as e:
 # === CONFIG ===
 load_dotenv()
 API_KEY = os.getenv("GOOGLE_API_KEY")
-MODEL_NAME = os.getenv("MODEL_NAME", "gemini-1.5-flash")
 
-DIR_PENDING = "/app/data/processed/pending_council" # 這裡應該是 Phase 2 產出的檔案
-DIR_READY = "/app/data/processed/ready_to_apply"
+# 資料夾路徑
+DIR_PENDING = "/app/data/processed/pending_council" 
+FORCE_REFRESH = False 
 
-# 除非你要調 Prompt，否則設為 False 以節省金錢
-FORCE_REFRESH = True 
-
-# === 關鍵：角色名稱對照表 (Name to ID Mapping) ===
+# 專家 ID 對照表
 ROLE_NAME_TO_ID = {
-    "HR Gatekeeper": "E1",
-    "Tech Lead": "E2",
-    "Strategist": "E3",
-    "Visa Officer": "E4",
-    "Academic Reviewer": "E5",
-    "Academic": "E5", # 容錯
-    "System Architect": "E6",
-    "Leadership Scout": "E7",
-    "Startup Veteran": "E8"
+    "HR Gatekeeper": "E1", "Tech Lead": "E2", "Strategist": "E3", 
+    "Visa Officer": "E4", "Academic Reviewer": "E5", "Academic": "E5",
+    "System Architect": "E6", "Leadership Scout": "E7", "Startup Veteran": "E8"
 }
 
 def get_expert_color(eid):
@@ -51,136 +41,196 @@ def get_expert_color(eid):
     return colors.get(eid, "white")
 
 def get_target_experts(dossier):
-    """
-    🕵️‍♂️ 智慧路由：支援兩種格式的輸入
-    """
+    """決定這份 JD 需要哪些專家"""
     target_ids = []
     
-    # === 模式 A: 讀取 Triage Result (ActiveFence 格式) ===
-    # 位置: triage_result -> referral_analysis
+    # 1. Check Triage Result
     referral = dossier.get('triage_result', {}).get('referral_analysis', {})
-    
     if referral and isinstance(referral, dict):
         for eid, data in referral.items():
             if not eid.startswith("E"): continue
-            
-            score = data.get('relevance', 0)
             note = data.get('note', '').lower()
+            score = data.get('relevance', 0)
             
-            # [優化邏輯]
-            # 1. 強制召喚：標籤是 Must, Important, Relevant (不管分數)
-            if note in ['must', 'important', 'relevant']:
+            if note in ['must', 'important', 'relevant'] or score >= 6:
                 target_ids.append(eid)
-                
-            # 2. 條件召喚：分數 >= 6 (即使標籤只是 Helpful 或 N/A)
-            # 這樣可以過濾掉 E3 (Score 3, Helpful) 和 E7 (Score 5, Helpful) -> 省錢！
-            elif score >= 6:
-                target_ids.append(eid)
-                
-        if target_ids:
-            return sorted(list(set(target_ids)))
 
-    # === 模式 B: 讀取 Role Name List (Blackshark 格式) ===
-    # 位置: council_strategy -> active_experts
+    # 2. Check Strategy List
     strategy = dossier.get('council_strategy', {})
     active_roles = strategy.get('active_experts', [])
-    
     if active_roles and isinstance(active_roles, list):
         for role in active_roles:
             eid = ROLE_NAME_TO_ID.get(role)
-            if eid:
-                target_ids.append(eid)
-        if target_ids:
-            return sorted(list(set(target_ids)))
+            if eid: target_ids.append(eid)
 
-    # === 預設 (Fallback) ===
-    return ["E1", "E2"]
+    return sorted(list(set(target_ids))) if target_ids else ["E1", "E2"]
 
+# ==========================================
+# 🟡 Sub-Function: Step 1 (Skill Extraction)
+# ==========================================
+def _step1_skill_extraction(dossier, target_experts, gateway, factory):
+    """
+    只負責執行 Skill Extraction 的邏輯，不負責讀寫檔
+    """
+    company = dossier.get('basic_info', {}).get('company', 'Unknown')
+    raw_jd = dossier.get('raw_content', '')
+    
+    # 準備 Context
+    context_data = {
+        "job_title": dossier.get('basic_info', {}).get('role', ''),
+        "company_name": company,
+        "raw_jd_text": raw_jd
+    }
 
+    tqdm.write(colored(f"  🟡 [Step 1] Extracting Skills...", "yellow"))
+    
+    if 'expert_council' not in dossier: dossier['expert_council'] = {}
+    current_results = dossier['expert_council'].get('skill_analysis', {})
+
+    for eid in target_experts:
+        try:
+            # Cache Check
+            cached = council_memory.get(raw_jd, eid, "SKILL")
+            if cached and not FORCE_REFRESH:
+                current_results[eid] = cached
+                tqdm.write(colored(f"    🧠 {eid}: Cache Hit", get_expert_color(eid)))
+                continue
+
+            # Gateway Call
+            prompt = factory.create_expert_prompt(eid, "SKILL", context_data)
+            result = gateway.generate(prompt, validate_council_skill)
+            
+            # Save Logic
+            council_memory.save(raw_jd, eid, "SKILL", result)
+            current_results[eid] = result
+            
+            count = len(result.get("required_skills", []))
+            tqdm.write(colored(f"    👤 {eid}: Found {count} skills", get_expert_color(eid)))
+
+        except Exception as e:
+            tqdm.write(colored(f"    ❌ {eid} Skill Error: {e}", "red"))
+
+    dossier['expert_council']['skill_analysis'] = current_results
+    return dossier
+
+# ==========================================
+# 🔵 Sub-Function: Step 2 (Gap & Effort Analysis)
+# ==========================================
+def _step2_gap_analysis(dossier, gateway, factory, db_context):
+    """
+    只負責執行 Gap Analysis 的邏輯 (含 Retriever)
+    """
+    raw_jd = dossier.get('raw_content', '')
+    company = dossier.get('basic_info', {}).get('company', 'Unknown')
+    
+    skill_map = dossier.get('expert_council', {}).get('skill_analysis', {})
+    if 'gap_analysis' not in dossier['expert_council']:
+        dossier['expert_council']['gap_analysis'] = {}
+    current_gaps = dossier['expert_council']['gap_analysis']
+
+    tqdm.write(colored(f"  🔵 [Step 2] Gap & Effort Analysis...", "cyan"))
+    
+    active_experts = list(skill_map.keys())
+
+    for eid in active_experts:
+        try:
+            p1_memory = skill_map[eid]
+            if not p1_memory or "required_skills" not in p1_memory: continue
+
+            # Cache Check
+            cached = council_memory.get(raw_jd, eid, "GAP_EFFORT")
+            if cached and not FORCE_REFRESH:
+                current_gaps[eid] = cached
+                tqdm.write(colored(f"    🧠 {eid}: Gap Cache Hit", get_expert_color(eid)))
+                continue
+
+            # Context Injection (把 Main 傳進來的 DB 塞進去)
+            context_data = {
+                "job_title": dossier.get('basic_info', {}).get('role', ''),
+                "company_name": company,
+                "previous_phase_memory": p1_memory, 
+                "personal_db_text": db_context['personal'],
+                "resume_db_text": db_context['resume']
+            }
+
+            # Gateway Call (自動切換模型)
+            prompt = factory.create_expert_prompt(eid, "GAP_EFFORT", context_data)
+            result = gateway.generate(prompt, validate_gap_effort)
+
+            # Save Logic
+            council_memory.save(raw_jd, eid, "GAP_EFFORT", result)
+            current_gaps[eid] = result
+            
+            # 統計顯示
+            gaps = result.get("gap_analysis", [])
+            found_count = sum(1 for g in gaps if "FOUND" in g.get("evidence_in_personal_db", {}).get("status", ""))
+            tqdm.write(colored(f"    👤 {eid}: {found_count}/{len(gaps)} skills matched evidence.", get_expert_color(eid)))
+
+        except Exception as e:
+            tqdm.write(colored(f"    ❌ {eid} Gap Error: {e}", "red"))
+
+    dossier['expert_council']['gap_analysis'] = current_gaps
+    return dossier
+
+# ==========================================
+# 🚀 Main Controller (Orchestrator)
+# ==========================================
 def run_phase3_dynamic_execution():
-    cprint("\n🏛️  [Phase 3] EXPERT COUNCIL: Dynamic Diagnosis", "magenta", attrs=['bold', 'reverse'])
+    cprint("\n🏛️  [Phase 3] EXPERT COUNCIL: Dynamic Diagnosis Pipeline", "magenta", attrs=['bold', 'reverse'])
     
-    # 初始化 (省略部分與之前相同...)
-    if not API_KEY: return
-    genai.configure(api_key=API_KEY)
-    model = genai.GenerativeModel(MODEL_NAME)
-    
+    # 1. 初始化共通工具 (只做一次)
     try:
-        # PromptFactory 需要「包含 character_setting 的目錄」= src/agents
-        # 從本檔 (src/phases/p3_council.py) 往回推，避免依賴 cwd，本地 / Docker 都能用
-        _src = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        pf_root = os.path.join(_src, "agents")
+        # Gateway 負責模型路由與重試
+        gateway = SmartModelGateway(API_KEY)
+        
+        # Factory 負責 Prompt
+        pf_root = os.path.abspath("src/agents")
         factory = PromptFactory(root_dir=pf_root)
+        
     except Exception as e:
-        cprint(f"❌ Error: {e}", "red"); return
+        cprint(f"❌ Init Failed: {e}", "red"); return
 
+    # 2. 預載資料庫 (只做一次，傳遞給 Step 2 使用)
+    cprint("🔌 Pre-loading Knowledge Base...", "white")
+    db_context = {
+        "personal": db_connector.get_personal_knowledge_context(),
+        "resume": db_connector.get_resume_bullets_context()
+    }
+    cprint(f"📚 DB Loaded: Personal ({len(db_context['personal'])} chars), Resume ({len(db_context['resume'])} chars)", "green")
+
+    # 3. 遍歷檔案
     files = glob.glob(os.path.join(DIR_PENDING, "*.json"))
-    pbar = tqdm(files, desc="🧠 Processing Dossiers", unit="job")
+    pbar = tqdm(files, desc="Processing Dossiers", unit="job")
     
     for filepath in pbar:
-        filename = os.path.basename(filepath)
-        target_path = os.path.join(DIR_READY, filename)
-        
+        # Load Dossier
         with open(filepath, 'r', encoding='utf-8') as f:
             dossier = json.load(f)
 
         company = dossier.get('basic_info', {}).get('company', 'Unknown')
-        raw_jd = dossier.get('raw_content', '')
-        
-        # === 1. 決定要叫誰 (Router) ===
-        # 這裡不再用寫死的 ACTIVE_EXPERTS，而是看這份 JD 需要誰
+        pbar.set_postfix(company=company[:10])
+        tqdm.write(colored(f"\n🎯 Target: {company}", "white", attrs=['bold']))
+
+        # 決定專家 (Routing)
         target_experts = get_target_experts(dossier)
+        tqdm.write(colored(f"  route -> {', '.join(target_experts)}", "dark_grey"))
+        print(f"Called experts {target_experts}")
+        input()
+
+        # === 執行 Step 1: Skill Extraction ===
+        dossier = _step1_skill_extraction(dossier, target_experts, gateway, factory)
         
-        pbar.set_postfix(company=company[:10], experts=len(target_experts))
-        tqdm.write(colored(f"\nTarget: {company}", "white", attrs=['bold']) + 
-                   colored(f" | Summoning: {', '.join(target_experts)}", "yellow"))
+        # [Checkpoint Save] 中途存檔 (安全網)
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(dossier, f, indent=2, ensure_ascii=False)
 
-        context_data = {
-            "job_title": dossier.get('basic_info', {}).get('role', ''),
-            "company_name": company,
-            "raw_jd_text": raw_jd
-        }
+        # === 執行 Step 2: Gap Analysis ===
+        dossier = _step2_gap_analysis(dossier, gateway, factory, db_context)
 
-        expert_results = {}
+        # === [Checkpoint] 預留位置給未來的 Strategy Data ===
+        # dossier = _step3_strategy_summary(...) 
         
-        # === 2. 針對名單上的專家執行分析 (含 Cache) ===
-        for eid in target_experts:
-            try:
-                # [Cache Check]
-                cached_data = council_memory.get(raw_jd, eid, "SKILL") # 注意：這裡假設還是在做 Skill 分析
-                
-                if cached_data and not FORCE_REFRESH:
-                    expert_results[eid] = cached_data
-                    tqdm.write(colored(f"  🧠 {eid}: Cache Hit", get_expert_color(eid)))
-                    continue
-
-                # [LLM Call]
-                prompt = factory.create_expert_prompt(eid, "SKILL", context_data)
-                result_json = generate_with_retry(
-                    model=model, 
-                    prompt=prompt, 
-                    validator_func=validate_council_skill,
-                    max_retries=2
-                )
-                
-                # [Cache Save]
-                council_memory.save(raw_jd, eid, "SKILL", result_json)
-                expert_results[eid] = result_json
-                
-                # Visual
-                count = len(result_json.get("required_skills", []))
-                tqdm.write(colored(f"  👤 {eid}: Analyzed ({count} skills)", get_expert_color(eid)))
-            
-            except Exception as e:
-                tqdm.write(colored(f"  ❌ {eid} Failed: {e}", "red"))
-
-        # === 3. 存檔 ===
-        if 'expert_council' not in dossier:
-            dossier['expert_council'] = {}
-            
-        dossier['expert_council']['skill_analysis'] = expert_results
-        
-        # 這裡示範直接覆蓋原始檔案 (Updating In-Place)，或者存到 DIR_READY
+        # [Final Save] 最終存檔
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(dossier, f, indent=2, ensure_ascii=False)
 
