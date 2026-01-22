@@ -5,6 +5,8 @@ from termcolor import cprint
 
 # 設定 DB 路徑 (跟你的 ingestion script 保持一致)
 CHROMA_PATH = os.getenv("CHROMA_DB_PATH", "/app/data/chroma_db")
+USER_PROFILE_PATH = os.getenv("PATH_TO_USER_PROFILE", "/app/data/chroma_db")
+
 
 class DBConnector:
     def __init__(self):
@@ -13,6 +15,7 @@ class DBConnector:
             self.client = None
         else:
             self.client = chromadb.PersistentClient(path=CHROMA_PATH)
+        self.data_dir = USER_PROFILE_PATH
 
     def get_personal_knowledge_context(self):
         """
@@ -42,6 +45,26 @@ class DBConnector:
             return context_text
         except Exception as e:
             return f"(Error reading Personal DB: {e})"
+
+    def get_user_profile(self):
+        """
+        [NEW] 讀取使用者技術小抄 (JSON)
+        用途: 給 Phase 3 Gemma 做快速過濾，或給 Phase 4 做戰略分析
+        """
+        file_path = os.path.join(self.data_dir, "user_profile.json")
+        
+        if os.path.exists(file_path):
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    # 轉成 compact string 以節省 token，但保留 key structure
+                    return json.dumps(data, indent=2, ensure_ascii=False)
+            except Exception as e:
+                cprint(f"⚠️ [DB] Failed to load user_profile.json: {e}", "yellow")
+                return "{}"
+        else:
+            cprint(f"⚠️ [DB] user_profile.json not found at {file_path}", "yellow")
+            return "{}"
 
     def get_resume_bullets_context(self):
         """

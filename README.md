@@ -263,10 +263,12 @@ Start the Docker container in detached mode: ```docker-compose up -d --build```
 ## 🛠️ Tech Stack
 * **Orchestration:** Python, Google Generative AI SDK (Gemini API)
 * **Hybrid Model Architecture (Smart Gateway):**
-    * **Logic & Extraction:** Gemma-3-27b-it (Unlimited Quota)
+    * **Logic & Extraction:** Gemma-3-27b-it (Larger Quota)
     * **Long-Context Retrieval:** Gemini-2.5-Flash (High TPM, Daily Limit Optimized)
+    * **Reliability:** Pydantic for Structured Output enforcement (JSON Schema Validation) 🛡️
 * **Vector Store:** ChromaDB (Using default `all-MiniLM-L6-v2` for local embeddings)
 * **Environment:** Python 3.11 / Docker
+
 
 ## 📂 Data Structure
 The system automatically manages raw inputs and cached outputs:

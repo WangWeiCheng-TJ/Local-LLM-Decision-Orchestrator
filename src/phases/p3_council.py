@@ -17,6 +17,7 @@ try:
     from src.tools.db_connector import db_connector         # [NEW] 資料庫連線
     from src.tools.tool import validate_council_skill, validate_gap_effort
     from src.agents.cache_manager import council_memory 
+    from src.tools.schemas import GapAnalysisReport
 except ImportError as e:
     cprint(f"❌ Error: Import failed. {e}", "red")
     sys.exit(1)
@@ -68,7 +69,7 @@ def get_target_experts(dossier):
 # ==========================================
 # 🟡 Sub-Function: Step 1 (Skill Extraction)
 # ==========================================
-def _step1_skill_extraction(dossier, target_experts, gateway, factory):
+def _step1_skill_extraction(dossier, target_experts, gateway, factory, user_profile_summary):
     """
     只負責執行 Skill Extraction 的邏輯，不負責讀寫檔
     """
@@ -79,7 +80,8 @@ def _step1_skill_extraction(dossier, target_experts, gateway, factory):
     context_data = {
         "job_title": dossier.get('basic_info', {}).get('role', ''),
         "company_name": company,
-        "raw_jd_text": raw_jd
+        "raw_jd_text": raw_jd,
+        "user_profile_summary": user_profile_summary  # <--- 注入 Prompt
     }
 
     tqdm.write(colored(f"  🟡 [Step 1] Extracting Skills...", "yellow"))
@@ -118,17 +120,19 @@ def _step1_skill_extraction(dossier, target_experts, gateway, factory):
 # ==========================================
 def _step2_gap_analysis(dossier, gateway, factory, db_context):
     """
-    只負責執行 Gap Analysis 的邏輯 (含 Retriever)
+    執行 Phase 3.5：同時進行「證據檢索 (Retriever)」與「落差分析 (Gap Analysis)」
+    [與之前不同處]：加入了 Gatekeeper 過濾邏輯，擋下 MISSING 的技能以節省 Flash 額度。
     """
     raw_jd = dossier.get('raw_content', '')
     company = dossier.get('basic_info', {}).get('company', 'Unknown')
     
     skill_map = dossier.get('expert_council', {}).get('skill_analysis', {})
+    
     if 'gap_analysis' not in dossier['expert_council']:
         dossier['expert_council']['gap_analysis'] = {}
     current_gaps = dossier['expert_council']['gap_analysis']
 
-    tqdm.write(colored(f"  🔵 [Step 2] Gap & Effort Analysis...", "cyan"))
+    tqdm.write(colored(f"  🔵 [Step 2] Gap & Effort Analysis (Filtered by Gatekeeper)...", "cyan"))
     
     active_experts = list(skill_map.keys())
 
@@ -137,37 +141,71 @@ def _step2_gap_analysis(dossier, gateway, factory, db_context):
             p1_memory = skill_map[eid]
             if not p1_memory or "required_skills" not in p1_memory: continue
 
-            # Cache Check
+            # --- A. Cache Check ---
             cached = council_memory.get(raw_jd, eid, "GAP_EFFORT")
             if cached and not FORCE_REFRESH:
                 current_gaps[eid] = cached
                 tqdm.write(colored(f"    🧠 {eid}: Gap Cache Hit", get_expert_color(eid)))
                 continue
 
-            # Context Injection (把 Main 傳進來的 DB 塞進去)
+            # === 🛑 [NEW] Gatekeeper Filter (守門員過濾) ===
+            # 目的：剔除 Step 1 已經標記為 'MISSING' 的技能，不要浪費 Flash 額度去查
+            raw_skills = p1_memory.get("required_skills", [])
+            skills_to_analyze = []
+            skipped_count = 0
+
+            for skill in raw_skills:
+                # 檢查 Step 1 的標記 (MATCH / POTENTIAL / MISSING)
+                # 如果是 MISSING，直接跳過；如果是 MATCH 或 POTENTIAL (或沒標記)，則保留
+                if skill.get("quick_check") == "MISSING":
+                    skipped_count += 1
+                    continue
+                skills_to_analyze.append(skill)
+            
+            # 優化：如果過濾後發現沒東西需要查 (例如全部都缺)，就直接跳過 API Call
+            if not skills_to_analyze:
+                tqdm.write(colored(f"    ⏩ {eid}: All {skipped_count} skills are MISSING. Skipping Flash call.", "blue"))
+                # 這裡我們可以選擇塞一個空的結果，或者甚麼都不做
+                # current_gaps[eid] = {"gap_analysis": [], "note": "All filtered by Gatekeeper"} 
+                continue
+
+            if skipped_count > 0:
+                tqdm.write(colored(f"    🛡️ {eid}: Filtered {skipped_count} missing skills. Analyzing {len(skills_to_analyze)} items...", "blue"))
+
+            # 建立過濾後的 Memory 物件
+            p1_memory_filtered = {"required_skills": skills_to_analyze}
+
+            # --- B. Context Injection ---
             context_data = {
                 "job_title": dossier.get('basic_info', {}).get('role', ''),
                 "company_name": company,
-                "previous_phase_memory": p1_memory, 
+                "previous_phase_memory": p1_memory_filtered, # <--- 傳入過濾後的清單
                 "personal_db_text": db_context['personal'],
                 "resume_db_text": db_context['resume']
             }
 
-            # Gateway Call (自動切換模型)
+            # --- C. AI Execution (Gateway) ---
             prompt = factory.create_expert_prompt(eid, "GAP_EFFORT", context_data)
-            result = gateway.generate(prompt, validate_gap_effort)
+            
+            # [MODIFIED] 傳入 Pydantic Schema
+            # 告訴 Gateway: "我要這個格式，其他的都不要"
+            result = gateway.generate(
+                prompt, 
+                validate_gap_effort, 
+                schema=GapAnalysisReport
+            )
 
-            # Save Logic
+            # --- D. Save & Store ---
             council_memory.save(raw_jd, eid, "GAP_EFFORT", result)
             current_gaps[eid] = result
-            
+
             # 統計顯示
             gaps = result.get("gap_analysis", [])
             found_count = sum(1 for g in gaps if "FOUND" in g.get("evidence_in_personal_db", {}).get("status", ""))
-            tqdm.write(colored(f"    👤 {eid}: {found_count}/{len(gaps)} skills matched evidence.", get_expert_color(eid)))
+            tqdm.write(colored(f"    👤 {eid}: Analyzed {len(gaps)} items. Evidence found: {found_count}", get_expert_color(eid)))
 
         except Exception as e:
-            tqdm.write(colored(f"    ❌ {eid} Gap Error: {e}", "red"))
+            tqdm.write(colored(f"    ❌ {eid} Gap Analysis Failed: {e}", "red"))
 
     dossier['expert_council']['gap_analysis'] = current_gaps
     return dossier
@@ -190,8 +228,13 @@ def run_phase3_dynamic_execution():
     except Exception as e:
         cprint(f"❌ Init Failed: {e}", "red"); return
 
+
+
     # 2. 預載資料庫 (只做一次，傳遞給 Step 2 使用)
     cprint("🔌 Pre-loading Knowledge Base...", "white")
+    # [MODIFIED] 直接呼叫 db_connector
+    user_profile_str = db_connector.get_user_profile()
+    
     db_context = {
         "personal": db_connector.get_personal_knowledge_context(),
         "resume": db_connector.get_resume_bullets_context()
@@ -215,10 +258,10 @@ def run_phase3_dynamic_execution():
         target_experts = get_target_experts(dossier)
         tqdm.write(colored(f"  route -> {', '.join(target_experts)}", "dark_grey"))
         print(f"Called experts {target_experts}")
-        input()
+        # input()
 
         # === 執行 Step 1: Skill Extraction ===
-        dossier = _step1_skill_extraction(dossier, target_experts, gateway, factory)
+        dossier = _step1_skill_extraction(dossier, target_experts, gateway, factory, user_profile_str)
         
         # [Checkpoint Save] 中途存檔 (安全網)
         with open(filepath, 'w', encoding='utf-8') as f:

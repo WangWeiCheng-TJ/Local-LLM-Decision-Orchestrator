@@ -7,6 +7,7 @@ from src.tools.salary import SalaryTool
 
 USE_MOCK_TOOLS = os.getenv("USE_MOCK_TOOLS", "False").lower() == "true"
 
+
 class MockSalaryTool:
     """模擬查詢市場薪資行情的工具"""
     
