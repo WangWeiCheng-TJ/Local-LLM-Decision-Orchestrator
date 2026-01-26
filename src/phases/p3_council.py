@@ -17,7 +17,7 @@ try:
     from src.tools.db_connector import db_connector         # [NEW] 資料庫連線
     from src.tools.tool import validate_council_skill, validate_gap_effort
     from src.agents.cache_manager import council_memory 
-    from src.tools.schemas import GapAnalysisReport
+    from src.tools.schemas import GapAnalysisReport, SkillExtractionReport, AdvisorReport
 except ImportError as e:
     cprint(f"❌ Error: Import failed. {e}", "red")
     sys.exit(1)
@@ -69,7 +69,7 @@ def get_target_experts(dossier):
 # ==========================================
 # 🟡 Sub-Function: Step 1 (Skill Extraction)
 # ==========================================
-def _step1_skill_extraction(dossier, target_experts, gateway, factory, user_profile_summary):
+def _step1_skill_extraction(dossier, target_experts, gateway, factory):
     """
     只負責執行 Skill Extraction 的邏輯，不負責讀寫檔
     """
@@ -78,10 +78,10 @@ def _step1_skill_extraction(dossier, target_experts, gateway, factory, user_prof
     
     # 準備 Context
     context_data = {
+        "mode": "SKILL",
         "job_title": dossier.get('basic_info', {}).get('role', ''),
         "company_name": company,
         "raw_jd_text": raw_jd,
-        "user_profile_summary": user_profile_summary  # <--- 注入 Prompt
     }
 
     tqdm.write(colored(f"  🟡 [Step 1] Extracting Skills...", "yellow"))
@@ -100,7 +100,7 @@ def _step1_skill_extraction(dossier, target_experts, gateway, factory, user_prof
 
             # Gateway Call
             prompt = factory.create_expert_prompt(eid, "SKILL", context_data)
-            result = gateway.generate(prompt, validate_council_skill)
+            result = gateway.generate(prompt, validate_council_skill, schema=SkillExtractionReport)
             
             # Save Logic
             council_memory.save(raw_jd, eid, "SKILL", result)
@@ -136,7 +136,14 @@ def _step2_gap_analysis(dossier, gateway, factory, db_context):
     
     active_experts = list(skill_map.keys())
 
+    NON_SKILL_EXPERTS = ["E3", "E4", "E6"] # we dont need these experts for gap 
+
     for eid in active_experts:
+        # === 1. 排除非技能專家 ===
+        if eid in NON_SKILL_EXPERTS:
+            tqdm.write(colored(f"    🚫 {eid}: Skipped (Contextual Expert, not Skill Gap focused).", "light_grey"))
+            continue
+
         try:
             p1_memory = skill_map[eid]
             if not p1_memory or "required_skills" not in p1_memory: continue
@@ -176,13 +183,19 @@ def _step2_gap_analysis(dossier, gateway, factory, db_context):
             p1_memory_filtered = {"required_skills": skills_to_analyze}
 
             # --- B. Context Injection ---
+            # 只餵入：1. JD 提取的技能, 2. 精華 Cheat Sheet, 3. 履歷 (Resume)
             context_data = {
                 "job_title": dossier.get('basic_info', {}).get('role', ''),
                 "company_name": company,
-                "previous_phase_memory": p1_memory_filtered, # <--- 傳入過濾後的清單
-                "personal_db_text": db_context['personal'],
-                "resume_db_text": db_context['resume']
+                "previous_phase_memory": p1_memory_filtered, # Phase 1 的技能清單
+                
+                # [核心修改] 使用蒸餾過的資訊代替原始大數據
+                "user_profile_short": db_context.get('user_profile_short', 'No short summary available.'), 
+                "resume_db_text": db_context.get('resume', 'No resume available.')
             }
+
+            # 註：如果你的 Prompt Factory 預期的 Key 還是 personal_db_text，
+            # 也可以維持 Key 名稱不變，但傳入的 Value 改成 Cheat Sheet。
 
             # --- C. AI Execution (Gateway) ---
             prompt = factory.create_expert_prompt(eid, "GAP_EFFORT", context_data)
@@ -232,12 +245,11 @@ def run_phase3_dynamic_execution():
 
     # 2. 預載資料庫 (只做一次，傳遞給 Step 2 使用)
     cprint("🔌 Pre-loading Knowledge Base...", "white")
-    # [MODIFIED] 直接呼叫 db_connector
-    user_profile_str = db_connector.get_user_profile()
-    
+
     db_context = {
         "personal": db_connector.get_personal_knowledge_context(),
-        "resume": db_connector.get_resume_bullets_context()
+        "resume": db_connector.get_resume_bullets_context(),
+        'user_profile_short': db_connector.get_user_profile()
     }
     cprint(f"📚 DB Loaded: Personal ({len(db_context['personal'])} chars), Resume ({len(db_context['resume'])} chars)", "green")
 
@@ -261,7 +273,7 @@ def run_phase3_dynamic_execution():
         # input()
 
         # === 執行 Step 1: Skill Extraction ===
-        dossier = _step1_skill_extraction(dossier, target_experts, gateway, factory, user_profile_str)
+        dossier = _step1_skill_extraction(dossier, target_experts, gateway, factory)
         
         # [Checkpoint Save] 中途存檔 (安全網)
         with open(filepath, 'w', encoding='utf-8') as f:

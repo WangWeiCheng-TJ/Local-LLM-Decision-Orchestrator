@@ -128,12 +128,11 @@ graph TD
         Retriever <-.-> |"Evidence/Chunks"| PersonalDB
         Retriever <-.-> |"Reusable Sentences"| ResumeDB
         Retriever --> |"Retrieved Material"| Panel2
-
-        Panel2 --> Out["📊 Strategy Data (Blueprint)"]:::output
     end
 
     %% === Phase 4: 戰略地圖 ===
     subgraph P4 ["Phase 4: Strategic Command"]
+        Panel2 --> Out["📊 Strategy Data (Blueprint)"]:::output
         Out & FirstReport --> MapEngine["🗺️ Correlation Engine"]:::agent
         MapEngine --> VisualMap["Visual Correlation Map"]
         VisualMap --> TheGeneral["👮 Strategist"]:::agent
