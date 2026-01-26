@@ -190,14 +190,16 @@ graph TD
    * **Implementation Status**: Implemented as ``TriageAgent`` in ``src/phases/p2_triage.py``. Each dossier is enriched with a structured triage_result block (e.g., ``decision``, ``reason``, ``domain_mismatch``), and only dossiers that pass this gate are moved into the pending_council queue for downstream MoA routing.
 
 #### 4. Dynamic Mixture-of-Agents (Phase 3)
-* **Router-Based Diagnosis**: Instead of a single generic "Analysis Prompt", a Router Agent activates a small set of specialized reviewers based on the JD's domain and seniority.
-    Example of the Council Members:
-    - **Academic Analyst**: For research‑heavy roles (e.g., Research Scientist; focus: publication track record, topic alignment, lab/team fit).
-    - **Engineering Lead**: For ML/Software roles (focus: deployment readiness, C++/systems skills, production constraints).
-    - **Startup Scout**: For early‑stage companies (focus: equity vs. cash trade‑offs, runway, product risk, role ambiguity).
-* **Benefit**: Produces domain‑specific, role‑aware gap analysis instead of generic career advice, by routing each JD to the most relevant advisors rather than treating all roles with a single monolithic prompt.
-* **Implementation Status**: Implemented as a single-pass council: for each JD, the Router selects a number of advisors and calls each exactly once, storing their scores and rationales back into the dossier. There is no multi-round debate at this stage due to API cost.
-* **Planned Enhancement**: A lightweight keyword-only ```user_profile.json`` will be introduced to pre-filter obviously mismatched JDs (e.g., hard skills that are completely absent) before invoking the council, further reducing large-model calls.
+- **Router-Based Diagnosis**: Instead of a single generic "Analysis Prompt", a Router Agent activates a small set of specialized reviewers based on the JD's domain and seniority. Example of the Council Members:
+  - **Academic Analyst**: For research‑heavy roles (e.g., Research Scientist; focus: publication track record, topic alignment, lab/team fit).
+  - **Engineering Lead**: For ML/Software roles (focus: deployment readiness, C++/systems skills, production constraints).
+  - **Startup Scout**: For early‑stage companies (focus: equity vs. cash trade‑offs, runway, product risk, role ambiguity).
+
+- **Benefit**: Produces domain‑specific, role‑aware gap analysis instead of generic career advice, by routing each JD to the most relevant advisors rather than treating all roles with a single monolithic prompt.
+
+- **Implementation Status**: 
+  - **Core System**: Implemented as a single-pass council. For each JD, the Router selects specialized advisors and calls each exactly once, storing their scores and rationales back into the dossier. No multi-round debate at this stage due to API cost.
+  - **✅ Pre-filtering Optimization**: A lightweight `user_profile.json` pre-filters obviously mismatched JDs (e.g., hard skills that are completely absent) using the Gemma model before invoking the expensive council, significantly reducing large-model API calls.
 
 Architecturally this behaves like a Mixture‑of‑Advisors (MoA) in a multi‑agent system, not an infra‑level sparse MoE model.
 
@@ -209,25 +211,32 @@ Architecturally this behaves like a Mixture‑of‑Advisors (MoA) in a multi‑a
 
 
 #### 6. Advisory Briefing Agent (Phase 5)
-Phase 5 is not just an advisor; it is the **Chief Editor**. It synthesizes the "Expert Demands" (from Phase 3) with the "Candidate's Ammo" (Resume Database) to generate a copy-paste ready execution plan.
-* **Comprehensive Execution Plan:** Instead of a fixed-length list, the Editor generates a dynamic, exhaustive list of directives to cover ALL expert demands and showcase power moves:
-  * **REUSE:** Identifies perfect matches in the existing resume bullets.
-  * **TWEAK:** Injects specific keywords (e.g., *"Change 'Cloud' to 'AWS EKS'"*) into existing bullets.
-  * **NEW:** Drafts brand-new "Gap Filler" bullets using transferable skills (STAR format).
-  * **LETTER:** Suggests narrative angles for the Cover Letter.
- * **Conflict Resolution Core:** Applies a strict "Editor-in-Chief" philosophy (e.g., *Technical Depth > HR Fluff*, *Safety > Risk*) to resolve conflicting advice from different experts.
 
+Phase 5 is not just an advisor; it is the **Chief Editor**. It synthesizes the "Expert Demands" (from Phase 3) with the "Candidate's Ammo" (Resume Database) to generate structured execution guidance.
+
+- **Structured Action Plans:** Instead of a fixed-length list, the Editor generates a dynamic, exhaustive list of directives to cover ALL expert demands and showcase relevant experience:
+  - **REUSE:** Identifies perfect matches in the existing resume bullets.
+  - **TWEAK:** Suggests specific keyword modifications (e.g., "Change 'Cloud' to 'AWS EKS'") into existing bullets.
+  - **NEW:** Proposes brand-new "Gap Filler" bullets using transferable skills (STAR format).
+  - **LETTER:** Recommends narrative angles for the Cover Letter.
+
+- **Conflict Resolution Core:** Applies a strict "Editor-in-Chief" philosophy (e.g., Technical Depth > HR Fluff, Safety > Risk) to resolve conflicting advice from different experts.
+
+- **Role:** Acts as a strategic **assistant** (not a ghostwriter), helping candidates efficiently locate and organize relevant experience through structured action items.
 
 ## ⚡ Quick Start & Setup
 
-1. Environment Configuration (`.env`)
+### 1. Environment Configuration (`.env`)
 Create a `.env` file in the root directory. This is crucial for linking your local files (e.g., Google Drive) to the Docker container. (refer to .env_example)
 
-2. Directory Setup
+### 2. Directory Setup
 Refer to [Data Structure](#-data-structure)
 
-3. Launch the System
-Start the Docker container in detached mode: ```docker-compose up -d --build```
+### 3. Launch the System
+Start the Docker container in detached mode:
+```bash
+docker-compose up -d --build
+```
 
 4. Memory Injection (Initialization)
 
@@ -243,21 +252,32 @@ Start the Docker container in detached mode: ```docker-compose up -d --build```
     * Feed: Drop new JD PDFs (or images) into ```data/jds/```.
     * Phase 1–3 (current V2.2 workflow):  
         * _Run the phase scripts explicitly (until they are fully integrated into `src/main.py` in a later update)._  
-        * ```bash
+            ```bash            
             # Phase 1: Tool-augmented JD parsing
-            docker-compose run --rm orchestrator python src/phases/p1_intel.py
+            docker-compose run --rm orchestrator python src/phases/p1_scout.py
 
             # Phase 2: Triage & Gatekeeping
             docker-compose run --rm orchestrator python src/phases/p2_triage.py
 
             # Phase 3: MoA Council (dynamic advisors)
             docker-compose run --rm orchestrator python src/phases/p3_council.py
+
+            # Phase 4: Strategic Clustering & ROI Ranking
+            docker-compose run --rm orchestrator python src/phases/p4_strategy.py
+
+            # Phase 5: War Room Editor (Execution Plans)
+            docker-compose run --rm orchestrator python src/phases/p5_advisor.py
             ```
-    * Review: Check the output in ```data/reports/```:
-        * ```Strategic_Leaderboard.csv```: Prioritize applications.
-        * ```Analysis_*.md```: Read detailed strategy & warnings.
-        * These reports are directly produced by the multi-phase pipeline (Triage, MoA council, War Room) implemented under src/phases/.
-    * Note: src/main.py currently runs the legacy V1 pipeline. V2.2 integrates Phase 1~3 as separate scripts under ``src/phases/`` and will be merged back into main.py in a future refactor.
+    * Review Outputs: 
+        - Phase 1 Output: ```data/processed/dossiers/``` - Parsed JD dossiers with intelligence reports
+        - Phase 2 Output: ```data/processed/pending_council/``` - Triaged JDs that passed gatekeeping
+        - Phase 3 Output: ```data/processed/pending_council/``` - Enriched with MoA expert analysis
+        - Phase 4 Output: ```data/processed/battle_plan/```final_battle_plan.json - Clustered jobs with ROI scores
+        - Phase 5 Output: ```data/processed/editor_reports/``` - Structured action plans per job (Markdown tables)
+    * Workflow Tips:
+        - Run Phase 1-3 sequentially for new JD batches
+        - Run Phase 4 when you want to prioritize by ROI (e.g., weekly review)
+        - Run Phase 5 interactively: it shows clusters and lets you select which one to generate plans for
 
     **Step 3**: Post-Battle Maintenance<br> When you receive an outcome (Reject/Interview):
     * Move the JD folder from Ongoing to Rejected (on your local drive).
