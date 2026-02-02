@@ -11,7 +11,7 @@ from tqdm import tqdm
 # === 路徑設定與引用 ===
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 from src.agents.triage import TriageAgent
-from src.agents.profile_generator import ProfileGeneratorAgent 
+# from src.agents.profile_generator import ProfileGeneratorAgent 
 
 # === CONFIG ===
 load_dotenv()
