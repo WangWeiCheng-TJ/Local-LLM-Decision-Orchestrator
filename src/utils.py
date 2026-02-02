@@ -141,23 +141,55 @@ def clean_json_text(text):
         
     return text.strip()
 
-def safe_generate_json(model, prompt, retries=3, delay=20, default_output=None):
+# === src/utils.py ===
+
+def safe_generate_json(model, prompt, retries=3, delay=20, default_output=None, gateway=None):
     """
-    這就是你的「防呆防護罩」。
+    [IMPROVED] 防呆 JSON 生成器 + 智慧模型選擇
     
     Args:
-        model: Gemini model 物件
+        model: (已廢棄，保留向下兼容) Gemini model 物件
         prompt: 提示詞
         retries: 重試次數 (預設 3 次)
-        delay: 每次重試中間休息幾秒 (預設 2 秒)
-        default_output: 如果全失敗，要回傳什麼預設值 (避免 Crash)
+        delay: 每次重試中間休息幾秒 (預設 20 秒)
+        default_output: 如果全失敗，要回傳什麼預設值
+        gateway: [NEW] SmartModelGateway 實例（如果提供，會自動選模型）
     
     Returns:
         dict: 解析好的 JSON 資料
     """
+    
+    # === [NEW] 智慧模型選擇 ===
+    if gateway is not None:
+        # 使用 gateway 自動選模型（會根據 prompt 長度選 Gemma 或 Flash）
+        for attempt in range(retries):
+            try:
+                # Gateway 會自動處理：token 計算 → 選模型 → 重試 → 錯誤處理
+                response_text = gateway.generate_raw(prompt)  # 假設 gateway 有 generate_raw 方法
+                
+                # 清洗 & 解析
+                cleaned_text = clean_json_text(response_text)
+                data = json.loads(cleaned_text)
+                return data
+                
+            except json.JSONDecodeError as e:
+                cprint(f"⚠️ [Attempt {attempt+1}/{retries}] JSON 解析失敗: {e}", "yellow")
+                time.sleep(delay*(attempt+1))
+                continue
+            
+            except Exception as e:
+                cprint(f"⚠️ [Attempt {attempt+1}/{retries}] Gateway Error: {e}", "yellow")
+                time.sleep(delay*(attempt+1))
+                continue
+        
+        # Gateway 模式失敗後 fallback
+        cprint(f"❌ Gateway mode failed after {retries} attempts.", "red")
+        return default_output if default_output is not None else {}
+    
+    # === [LEGACY] 傳統模式（向下兼容，如果沒提供 gateway）===
     for attempt in range(retries):
         try:
-            # 1. 發送請求
+            # 1. 發送請求（使用傳入的 model）
             response = model.generate_content(prompt)
             
             # 2. 清洗文字
@@ -166,66 +198,60 @@ def safe_generate_json(model, prompt, retries=3, delay=20, default_output=None):
             # 3. 嘗試解析 JSON
             data = json.loads(cleaned_text)
             return data
-
+            
         except json.JSONDecodeError as e:
             cprint(f"⚠️ [Attempt {attempt+1}/{retries}] JSON 解析失敗: {e}", "yellow")
-            # 這裡可以加一段邏輯：如果解析失敗，再次丟給 LLM 叫它修正格式 (Auto-Repair)
-            # 但為了簡單，我們先重試就好
-            
-        except exceptions.ResourceExhausted:
-            cprint(f"⚠️ [Attempt {attempt+1}/{retries}] Rate Limit (429). Cooling down...", "yellow")
-            time.sleep(delay * 2 * (attempt + 1)) # 指數退避，越等越久
-            continue
-
+        
         except Exception as e:
             cprint(f"⚠️ [Attempt {attempt+1}/{retries}] API Error: {e}", "yellow")
-            
+        
         # 失敗後休息一下再試
-        time.sleep(delay)
-
+        time.sleep(delay*(attempt+1))
+    
     # 如果重試次數用完還是失敗
     cprint(f"❌ API Call Failed after {retries} attempts.", "red")
     return default_output if default_output is not None else {}
 
 
-    def fetch_relevant_history_resumes(jd_text, n_results=3):
-        """
-        根據目前的 JD，去 History DB 找出最相關的 N 份「過去履歷」。
-        回傳：一個包含結構化履歷內容的 List。
-        """
-        try:
-            client = chromadb.PersistentClient(path=CHROMA_PATH)
-            # 注意：我們之前把 Resume 存進了 past_applications_jds，並標記 doc_type="RESUME"
-            collection = client.get_collection("past_applications_jds")
-            
-            # 1. 語意搜尋：找跟這個 JD 最像的 Resume
-            results = collection.query(
-                query_texts=[jd_text],
-                n_results=n_results,
-                where={"doc_type": "RESUME"} # 只找履歷，不找過去的 JD 或 Cover Letter
-            )
-            
-            retrieved_resumes = []
-            
-            for i, meta in enumerate(results['metadatas'][0]):
-                # 取得原始檔名作為 ID
-                source_name = meta.get('filename', f"Resume_{i}")
-                folder = meta.get('folder', 'Unknown')
-                
-                # 我們在 ingest 時把結構化資料存進了 'analysis_json' 這個 metadata 欄位
-                json_str = meta.get('analysis_json', '{}')
-                
-                try:
-                    struct_data = json.loads(json_str)
-                    retrieved_resumes.append({
-                        "source_id": f"{folder}/{source_name}", # 標記來源，方便 Council 指路
-                        "content": struct_data
-                    })
-                except:
-                    continue
 
-            return retrieved_resumes
+def fetch_relevant_history_resumes(jd_text, n_results=3):
+    """
+    根據目前的 JD，去 History DB 找出最相關的 N 份「過去履歷」。
+    回傳：一個包含結構化履歷內容的 List。
+    """
+    try:
+        client = chromadb.PersistentClient(path=CHROMA_PATH)
+        # 注意：我們之前把 Resume 存進了 past_applications_jds，並標記 doc_type="RESUME"
+        collection = client.get_collection("past_applications_jds")
+        
+        # 1. 語意搜尋：找跟這個 JD 最像的 Resume
+        results = collection.query(
+            query_texts=[jd_text],
+            n_results=n_results,
+            where={"doc_type": "RESUME"} # 只找履歷，不找過去的 JD 或 Cover Letter
+        )
+        
+        retrieved_resumes = []
+        
+        for i, meta in enumerate(results['metadatas'][0]):
+            # 取得原始檔名作為 ID
+            source_name = meta.get('filename', f"Resume_{i}")
+            folder = meta.get('folder', 'Unknown')
+            
+            # 我們在 ingest 時把結構化資料存進了 'analysis_json' 這個 metadata 欄位
+            json_str = meta.get('analysis_json', '{}')
+            
+            try:
+                struct_data = json.loads(json_str)
+                retrieved_resumes.append({
+                    "source_id": f"{folder}/{source_name}", # 標記來源，方便 Council 指路
+                    "content": struct_data
+                })
+            except:
+                continue
 
-        except Exception as e:
-            cprint(f"⚠️ History Retrieval Error: {e}", "red")
-            return []
+        return retrieved_resumes
+
+    except Exception as e:
+        cprint(f"⚠️ History Retrieval Error: {e}", "red")
+        return []

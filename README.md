@@ -243,16 +243,16 @@ docker-compose up -d --build
 4. Memory Injection (Initialization)
 
     **Step 1**: <br>Run these once initially, or whenever you update your Resume/AboutMe.md.
-    * Ingest Personal Knowledge (Identity):<br> ```docker-compose run --rm orchestrator python src/data/ingest.py``` <br> Reads ```data/raw/AboutMe.md``` and whatever files in ```data/raw/``` to build the agent's core understanding of YOU.
-    * Ingest Battle History (Experience):<br> ```docker-compose run --rm orchestrator python src/ingest_history.py``` <br> Scans your ```LOCAL_PATH_TO_...``` folders to index past applications for the "War Room" recall feature.
-    * **[NEW] Generate Tech Cheat Sheet (The Gatekeeper):**
-        * Use **NotebookLLM** to summarize your `AboutMe.md` + `Resume` into a raw JSON.
+    * Ingest Personal Knowledge (Identity):<br> ```docker-compose run --rm orchestrator python src/ingests/personal_data.py``` <br> Reads ```data/raw/AboutMe.md``` and whatever files in ```data/raw/``` to build the agent's core understanding of YOU.
+    * **[Advanced] Generate Tech Cheat Sheet (The Gatekeeper):**
+        * Use **NotebookLLM** to ingest your ``AboutMe.md`` + personal background and ask it to output a raw JSON summary.
         * Save it as `src/data/user_profile.json`.
-        * *Purpose:* This allows the system to pre-filter mismatched JDs using the lightweight Gemma model, saving precious Flash quota for deep analysis.
+        * *Purpose:* NotebookLLM excels at handling long-context windows, producing a holistic "Meta-Summary" of your career that standard chunk-based RAG might miss.
+    * Ingest Battle History (Experience):<br> ```docker-compose run --rm orchestrator python src/ingests/resume_history.py``` <br> Scans your ```LOCAL_PATH_TO_...``` folders to index past applications for the "War Room" recall feature.
 
-    **Step 2**: The Hunt <br>(v2 pipeline – Phase 1–3 are currently run via phase scripts, `main.py` remains v1 legacy)
+    **Step 2**: The Hunt <br>(v2 pipeline - Phase 1-3 are currently run via phase scripts, `main.py` remains v1 legacy)
     * Feed: Drop new JD PDFs (or images) into ```data/jds/```.
-    * Phase 1–3 (current v2 workflow):  
+    * Phase 1-3 (current v2 workflow):  
         * _Run the phase scripts explicitly (until they are fully integrated into `src/main.py` in a later update)._  
             ```bash            
             # Phase 1: Tool-augmented JD parsing

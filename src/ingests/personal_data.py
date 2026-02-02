@@ -4,6 +4,7 @@ import chromadb
 import google.generativeai as genai
 from termcolor import cprint
 from dotenv import load_dotenv
+import json
 
 # 引入防呆工具 (請確保 src/utils/llm_utils.py 存在)
 import sys
@@ -39,7 +40,20 @@ def extract_text(file_path):
         elif ext in [".md", ".txt"]:
             with open(file_path, "r", encoding="utf-8") as f:
                 return f.read(), "personal_note"
-        
+
+        # === [NEW] 處理 JSON (user_profile.json) ===
+        elif ext == ".json":
+            with open(file_path, "r", encoding="utf-8") as f:
+                json_content = json.load(f)
+                
+                # 如果是 user_profile.json，標記為特殊類型，不要過度 summarize
+                if filename == "user_profile.json":
+                    text = json.dumps(json_content, indent=2, ensure_ascii=False)
+                    return text, "user_profile"  # 特殊 doc_type
+                else:
+                    text = json.dumps(json_content, indent=2, ensure_ascii=False)
+                    return text, "structured_data"
+
         else:
             return None, None
 
@@ -48,37 +62,43 @@ def extract_text(file_path):
         return None, None
 
 def indexer_agent_process(filename, text, doc_type):
-    """
-    🤖 Indexer Agent: 不管是履歷還是筆記，通通貼上標籤
-    """
-    prompt = f"""
-    You are my Personal Data Archivist.
-    I am ingesting a document into my personal knowledge base.
-    
-    Filename: {filename}
-    Type: {doc_type}
-    Content Snippet: {text[:6000]}
-    
-    ### TASK
-    1. Identify the **Topic/Domain** (e.g., "Resume V1", "Project Alpha Notes", "Research Idea").
-    2. Extract **Keywords/Skills** mentioned.
-    3. Summarize the content in one sentence.
-    
-    ### OUTPUT JSON
-    {{
-        "summary": "Brief summary of this file.",
-        "domain": "Computer Vision / System Design / Career Profile",
-        "tags": ["#Tag1", "#Tag2"],
-        "is_resume": true/false
-    }}
-    """
-    
-    default_res = {
-        "summary": "Processing Failed",
-        "domain": "Unknown",
-        "tags": [],
-        "is_resume": False
-    }
+    # 如果是 user_profile，直接跳過 LLM，用原始 metadata
+    if doc_type == "user_profile":
+        return {
+            "summary": "User Profile (Pre-computed cheat sheet)",
+            "domain": "Career Profile",
+            "tags": ["#UserProfile", "#Skills", "#Education"],
+            "is_resume": False
+        }
+    else:
+        prompt = f"""
+        You are my Personal Data Archivist.
+        I am ingesting a document into my personal knowledge base.
+        
+        Filename: {filename}
+        Type: {doc_type}
+        Content Snippet: {text}
+        
+        ### TASK
+        1. Identify the **Topic/Domain** (e.g., "Resume V1", "Project Alpha Notes", "Research Idea").
+        2. Extract **Keywords/Skills** mentioned.
+        3. Summarize the content in one sentence.
+        
+        ### OUTPUT JSON
+        {{
+            "summary": "Brief summary of this file.",
+            "domain": "Computer Vision / System Design / Career Profile",
+            "tags": ["#Tag1", "#Tag2"],
+            "is_resume": true/false
+        }}
+        """
+        
+        default_res = {
+            "summary": "Processing Failed",
+            "domain": "Unknown",
+            "tags": [],
+            "is_resume": False
+        }
 
     return safe_generate_json(model, prompt, retries=3, default_output=default_res)
 

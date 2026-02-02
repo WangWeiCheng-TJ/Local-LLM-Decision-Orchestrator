@@ -47,23 +47,61 @@ class DBConnector:
             return f"(Error reading Personal DB: {e})"
 
     def get_user_profile(self):
-        """
-        [NEW] 讀取使用者技術小抄 (JSON)
-        用途: 給 Phase 3 Gemma 做快速過濾，或給 Phase 4 做戰略分析
-        """
-        file_path = os.path.join(self.data_dir, "user_profile.json")
-        
-        if os.path.exists(file_path):
+        # [IMPROVED] 讀取使用者 profile，支援 fallback
+        # Priority:
+        # 1. user_profile.json (手動，最快)
+        # 2. auto_generated_user_profile.json (自動生成，次快)
+        # 3. ChromaDB query (最慢，但總能運作)
+
+        # === Priority 1: 手動 user_profile.json ===
+        manual_path = os.path.join(self.data_dir, "user_profile.json")
+        if os.path.exists(manual_path):
             try:
-                with open(file_path, 'r', encoding='utf-8') as f:
+                with open(manual_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    # 轉成 compact string 以節省 token，但保留 key structure
+                    cprint("✅ Using manual user_profile.json", "green")
                     return json.dumps(data, indent=2, ensure_ascii=False)
             except Exception as e:
-                cprint(f"⚠️ [DB] Failed to load user_profile.json: {e}", "yellow")
+                cprint(f"⚠️ Failed to load manual user_profile.json: {e}", "yellow")
+        
+        # === Priority 2: 自動生成的 profile ===
+        auto_path = os.path.join(self.data_dir, "auto_generated_user_profile.json")
+        if os.path.exists(auto_path):
+            try:
+                with open(auto_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    cprint("✅ Using auto_generated_user_profile.json", "cyan")
+                    return json.dumps(data, indent=2, ensure_ascii=False)
+            except Exception as e:
+                cprint(f"⚠️ Failed to load auto profile: {e}", "yellow")
+        
+        # === Priority 3: ChromaDB fallback ===
+        cprint("⚠️ No user_profile found, using ChromaDB query fallback...", "yellow")
+        
+        if not self.client:
+            return "{}"
+        
+        try:
+            collection = self.client.get_collection("personal_knowledge")
+            results = collection.query(
+                query_texts=["technical skills, education, work experience, preferences"],
+                n_results=3
+            )
+            
+            if not results['documents']:
                 return "{}"
-        else:
-            cprint(f"⚠️ [DB] user_profile.json not found at {file_path}", "yellow")
+            
+            fallback_summary = {
+                "source": "chromadb_realtime_query",
+                "note": "No pre-computed profile found, generated on-the-fly",
+                "content": "\n\n---\n\n".join(results['documents'][0]) if results['documents'] else ""
+            }
+            
+            cprint("⚠️ Using ChromaDB query fallback (slowest)", "red")
+            return json.dumps(fallback_summary, indent=2, ensure_ascii=False)
+            
+        except Exception as e:
+            cprint(f"❌ All fallbacks failed: {e}", "red")
             return "{}"
 
     def get_resume_bullets_context(self):
